@@ -12,11 +12,17 @@ These are packaged as an [Agent Skill](https://agentskills.io/specification.md) 
 
 | Problem | Technique |
 |---|---|
-| Writing a large theme file without corrupting it | **Byte-exact push via staged uploads** (`stagedUploadsCreate` → upload bytes → `themeFilesUpsert` with `body: {type: URL}`) — no transcription |
-| Reading a theme file bigger than the tool budget | Bundle it with a large file to force persist-to-disk, then extract |
+| Writing a large theme file without corrupting it | **Prefer the Shopify CLI** (`theme push --only … --nodelete`) — it moves bytes and fails loudly. No CLI? **Byte-exact push via staged uploads** (`stagedUploadsCreate` → upload bytes → `themeFilesUpsert`) |
+| Reading a theme file bigger than the tool budget | `theme pull --only <file>` (CLI), or bundle with a large file to force persist-to-disk |
 | A font that isn't in Shopify's font picker | Override Horizon's CSS font variables in `theme.liquid`'s `<head>` + load the font yourself |
-| `settings_data.json` "won't save" | It validates atomically and **silently reverts** on a bad handle — verify by re-fetching |
-| Collection grid pushed to the right | `main-collection` `product_grid_width: full-width` |
+| `settings_data.json` "won't save" / reverts | Validates atomically and **silently reverts** on a bad handle; also the **theme editor overwrites it** — pull fresh before editing, verify by re-fetching |
+| Getting images onto products at scale | `images:[{url}]` with **public** `raw.githubusercontent.com` urls; `fileCreate` + poll `READY` for Files |
+| New product / collection is invisible | DRAFT & unpublished are hidden — `ACTIVE` + `publishablePublish` to Online Store |
+| Everything shows "Sold out" (drop-ship) | Set variants `inventoryPolicy: CONTINUE` |
+| Updating many products fast | **Aliased batch mutation** (`p0:`, `p1:`, … + variables) — one round-trip |
+| Client hates the design of the "Opening soon" page | That's the **password gate**, not the store — a Preferences system page, not a theme file |
+| "Make it look like `<competitor>`" | Extract the reference's computed styles (fonts/colors/radii) and rebuild to spec |
+| Collection grid pushed right / collapsed to 1 column | `product_grid_width: full-width`; force responsive `.resource-list--grid` columns |
 | Customers checking out a ₹0 free-gift-only cart | Sticky-reconcile gift logic + gifts-only checkout guard |
 
 ## Install (as a Claude Code plugin marketplace)

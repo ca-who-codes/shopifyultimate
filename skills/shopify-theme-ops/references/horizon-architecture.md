@@ -58,6 +58,8 @@ DOM: `<product-card class="product-card" data-product-id>` → `a.product-card__
 
 To restyle cards globally without touching every template, ship a scoped CSS+JS asset (loaded via the footer) that keys off grid contexts (`.product-grid`, `.product-list`, `.product-recommendations`, `.shopify-section`) and **excludes** the cart drawer / `<dialog>`. A `MutationObserver` re-applies to cards Horizon hydrates or re-renders. Keep it defensive: never remove/reparent the card link, gallery, or price DOM.
 
+**Selectors vary by Horizon version/settings — inspect the live DOM before writing CSS.** A different 2025 build (menu style `featured_products`) exposed: `.card-gallery` (wraps media + badge, `--badge-top-right`) → `.product-media` (`aspect-ratio:4/5`, `object-fit:cover`, base `img.product-media__image`); title an `<a class="contents">`; badge element `.product-badges__badge` (NOT `.badge`); product grid `.resource-list.resource-list--grid` with a `hidden--mobile` mobile-carousel sibling. That grid can **collapse to a single full-width column at ≤~1200px viewports** despite a `columns: 4` setting — force responsive columns via CSS (scoped `≥750px` so you don't reveal the mobile carousel). Full trap + fix in `live-verification-and-gotchas.md`.
+
 ## Cart drawer
 
 `<cart-drawer>` in a `<dialog>`; content in `.cart-drawer__content`; AJAX cart via `/cart/(add|change|update|clear).js`; reads via `/cart.js`. It re-renders its line items on change. Inject custom cart UI into `.cart-drawer__content` and re-inject on re-render via a `MutationObserver`. See `cart-free-gift-bar.md` for the cart-change detection pattern (fetch + XHR interception + events).

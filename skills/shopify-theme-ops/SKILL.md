@@ -1,9 +1,9 @@
 ---
 name: shopify-theme-ops
-description: Field-tested techniques for editing Shopify themes and store data via the Admin GraphQL API — especially the Horizon theme. Use when the user wants to edit theme files (templates/index.json, sections, assets, layout/theme.liquid, config/settings_data.json), change fonts/colors, fix collection or product layout, build custom-liquid sections, push CSS/JS assets, reorder product media, set collection images, or build cart free-gift / progress-bar logic — and you are working through an authenticated Admin GraphQL connection (MCP, private-app token, or Shopify CLI) rather than the theme editor UI. Covers byte-exact file writes via staged uploads, reading oversized theme files, the settings_data.json silent-revert trap, forcing unsupported fonts, Horizon's grid/section model, and cart-gift race conditions.
+description: Field-tested techniques for building and running a Shopify store programmatically — theme edits, catalogue/product ops, collections, menus, pages, and branding — especially the Horizon theme. Use when the user wants to edit theme files (templates/index.json, sections, assets, layout/theme.liquid, config/settings_data.json), change fonts/colors/logo/favicon or header layout, fix collection or product layout, build custom-liquid sections, push CSS/JS assets, reorder product media, set collection images, build cart free-gift / progress-bar or auto-rotating-gallery logic, bulk-create/update products, get images onto products, fix "Sold out" drop-ship variants, create smart collections, rewrite menus/pages, or replicate a reference site's design — working through the Shopify CLI or an authenticated Admin GraphQL connection (MCP, private-app token) rather than the theme editor UI. Covers CLI theme push, byte-exact writes via staged uploads, reading oversized theme files, the settings_data.json silent-revert trap, forcing unsupported fonts, Horizon's grid/section model, aliased batch mutations, the DRAFT/publish and inventory-policy traps, live browser verification, and cart-gift race conditions.
 license: MIT
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   author: ca-who-codes
 ---
 
@@ -11,19 +11,23 @@ metadata:
 
 You edit Shopify themes and store data **programmatically** through the Admin GraphQL API — not the theme editor UI. This skill is the playbook for doing that reliably, distilled from real production work on the **Horizon** theme.
 
-Assumes an authenticated Admin GraphQL connection is available (an MCP server, a private-app token + `curl`, or `shopify` CLI). Whenever this skill shows `graphql_query` / `graphql_mutation`, use whatever tool your environment exposes for authenticated Admin GraphQL.
+Assumes either the **Shopify CLI is authenticated for the store** (simplest) or an authenticated Admin GraphQL connection is available (an MCP server, a private-app token + `curl`). Whenever this skill shows `graphql_query` / `graphql_mutation`, use whatever tool your environment exposes for authenticated Admin GraphQL.
 
 ## The one rule that saves you: never hand-type file contents into a tool call
 
-Theme files (a `templates/*.json`, `layout/theme.liquid`, a 25 KB CSS asset) are too big and too fragile to retype or paste into a mutation. A single dropped `!important` or brace silently breaks the storefront. **Move bytes, not text.** See `references/byte-exact-file-pushes.md` — it's the most important file here.
+Theme files (a `templates/*.json`, `layout/theme.liquid`, a 25 KB CSS asset) are too big and too fragile to retype or paste into a mutation. A single dropped `!important` or brace silently breaks the storefront. **Move bytes, not text.**
 
-The core loop for **every** theme-file write:
+**Two ways to move bytes. Prefer the CLI.**
 
-1. Build the new file **on disk** with a script (Python `json.dumps` guarantees valid JSON; a string-replace on the fetched original guarantees byte-fidelity of everything you didn't touch).
-2. `stagedUploadsCreate` → get a Google Cloud Storage upload target.
-3. `curl` the file **bytes** to that target (validate the returned policy in Python first — hand-copied base64 causes 400/403).
-4. `themeFilesUpsert` with `body: { type: URL, value: <resourceUrl> }` — Shopify fetches the bytes.
-5. **Verify**: re-fetch the file and compare `checksumMd5` (or size, or a landmark substring). `themeFilesUpsert` returning no `userErrors` does **not** guarantee the change applied.
+- **Shopify CLI (simplest — use it if it's authed):** keep a local mirror, edit files on disk, `shopify theme push --only <file> --theme <id> --nodelete [--allow-live]`. It does the staged-upload dance for you, fails *loudly* on bad JSON, and needs no policy juggling. Full flags, the pull-fresh-before-edit rule, and draft-vs-live in `references/cli-theme-workflow.md`.
+- **Manual staged upload (Admin GraphQL only, no CLI):** `references/byte-exact-file-pushes.md`. The loop for **every** theme-file write this way:
+  1. Build the new file **on disk** with a script (Python `json.dumps` guarantees valid JSON; a string-replace on the fetched original guarantees byte-fidelity of everything you didn't touch).
+  2. `stagedUploadsCreate` → get a Google Cloud Storage upload target.
+  3. `curl` the file **bytes** to that target (validate the returned policy in Python first — hand-copied base64 causes 400/403).
+  4. `themeFilesUpsert` with `body: { type: URL, value: <resourceUrl> }` — Shopify fetches the bytes.
+  5. **Verify**: re-fetch the file and compare `checksumMd5` (or size, or a landmark substring). `themeFilesUpsert` returning no `userErrors` does **not** guarantee the change applied.
+
+Either way: build JSON with a script, never by hand, and **verify by looking at the live page** (`references/live-verification-and-gotchas.md`), not just at the tool's return value.
 
 ## Reading theme files
 
@@ -84,6 +88,45 @@ These go through normal Admin GraphQL mutations — no staged uploads needed:
 
 Copy-paste mutations in `references/admin-graphql-cookbook.md`.
 
+## Catalogue & products (building the store, not the theme)
+
+Building/fixing the actual products — `references/catalogue-and-products.md`. The traps that bite every time:
+
+- **Getting images onto products**: there is no "upload image" call. `create-product`/`productUpdate` take `images: [{url}]` where `url` is a **public HTTPS URL Shopify fetches**. For bulk, host the images in a dedicated **public** repo and pass `raw.githubusercontent.com/...` urls. To ingest one external image into Files: `fileCreate(files:[{originalSource, contentType: IMAGE}])`, then **poll `fileStatus` until `READY`** (the CDN url is null before that).
+- **"Sold out" on drop-ship**: tracked inventory + 0 qty renders "Sold out" and blocks purchase. Set every variant `inventoryPolicy: CONTINUE`.
+- **DRAFT products are invisible** on the storefront *and* theme previews — must be `ACTIVE` + published to Online Store.
+- **Batch with aliases**: one `graphql_mutation` with `p0:`, `p1:`, … + variables updates 17 products in a round-trip. Don't loop one call per product.
+- **`descriptionHtml` is wholesale-replace** (no append): fetch → transform in a script → resend.
+- Arg names differ: `productUpdate(product: …)` (new API), `collectionUpdate(input: …)`.
+
+## Collections, menus, pages
+
+`references/collections-menus-pages.md`:
+
+- **Smart collections** (auto-populating, e.g. "Gifts Under ₹5K"): `collectionCreate(input:{ruleSet:{appliedDisjunctively, rules:[{column: VARIANT_PRICE, relation: LESS_THAN, condition:"5000"}]}})`. `condition` is always a string.
+- **Publish, or it stays invisible**: `collectionCreate` doesn't publish to Online Store. `publishablePublish(id, input:[{publicationId}])` with the store's Online Store publication id (query `publications` — it is **not** `/1`).
+- **Menus**: `menuUpdate(id, title, items:[{title, type: HTTP, url:"/collections/x"}])` replaces the whole item list; `menuDelete` for leftover duplicate menus. `type: HTTP` + relative url is the always-works internal link.
+- **Pages**: new Page API — `pageUpdate(id, page:{title, body})`, field is **`body`** not `bodyHtml`. Watch for stale demo/old-brand copy in About/FAQ/Care/Shipping pages when rebranding.
+
+## Branding: logo, favicon, header — and the manual-only list
+
+`references/branding-logo-and-header.md`:
+
+- **Logo/favicon** are `settings_data.json` keys (`logo`, `favicon`, `logo_height`) set to `shopify://shop_images/<file>`. Get the image into Files first (`fileCreate`). No logo asset? **Render one from the display font with PIL** (supersampled mark + wordmark).
+- **Header layout** is `header-group.json` settings (`logo_position`, `menu_position`, `menu_row`, `search_position`, `enable_transparent_header_home`) — turning transparent-on-home **off** fixes washed-out nav over light sections.
+- **No API for**: store name (Settings → Store details), custom domain (registrar DNS: A `@`→`23.227.38.65`, CNAME `www`→`shops.myshopify.com`), the password/"Opening soon" gate (a Preferences system page; `templates/password.json` auto-regenerates — don't theme it). Surface these as manual steps. A plain "Opening soon" page the client calls "bad design" is the **password gate, not the store**.
+
+## Verify by looking at the live page
+
+`references/live-verification-and-gotchas.md` — the most important habit for anything visual. **WebFetch can't render CSS/fonts/JS; use a browser.** Inspect the live DOM to get exact class names **before** writing CSS (Horizon's classes vary by version — includes the `.resource-list--grid` collapse-to-1-column trap and its fix). Know the automation lies: Lenis breaks `scrollTo`, screenshots catch lazy-loaded images mid-render (`img.complete && naturalWidth>0` before calling an image broken), automation tabs report `document.hidden` (pauses rotators/autoplay). To **replicate a reference site**, extract its computed styles (fonts, colors, radii) and rebuild to spec — don't design from taste.
+
+## Recurring front-end builds
+
+Two builds show up repeatedly and each has a right way:
+
+- **Auto-rotating product galleries** — cross-fade every product image on a card, dependency-free, images from `/products/{handle}.js`, **progressively loaded** (data-src, load-on-show) so a grid doesn't download 80 images. `references/auto-rotating-gallery.md`.
+- **Cart free-gift / threshold progress bars** — below.
+
 ## Cart free-gift / threshold progress bars
 
 A recurring build — and a recurring source of a serious bug: **customers checking out a $0 gift-only cart**. If you build or touch one, read `references/cart-free-gift-bar.md`. The three non-negotiables:
@@ -102,9 +145,20 @@ A recurring build — and a recurring source of a serious bug: **customers check
 
 ## Reference index
 
-- `references/byte-exact-file-pushes.md` — the staged-upload write loop, with a working policy-validating uploader.
+**Moving bytes / theme files**
+- `references/cli-theme-workflow.md` — the Shopify CLI push/pull loop (the simple byte-mover); pull-fresh-before-edit; draft vs live.
+- `references/byte-exact-file-pushes.md` — the manual staged-upload write loop (Admin GraphQL only), with a policy-validating uploader.
 - `references/reading-large-theme-files.md` — reading files past the tool budget.
 - `references/fonts-and-settings-data.md` — the font-library reality + the CSS-variable override + settings_data pitfalls.
 - `references/horizon-architecture.md` — Horizon's sections/blocks/colors/grid/cart map.
-- `references/cart-free-gift-bar.md` — a correct, race-free gift-bar pattern.
+
+**Store data & catalogue**
+- `references/catalogue-and-products.md` — images onto products, `fileCreate`, the Sold-out/inventory-policy fix, DRAFT visibility, aliased batch mutations.
+- `references/collections-menus-pages.md` — smart collections + publishing, menus, pages.
 - `references/admin-graphql-cookbook.md` — copy-paste queries & mutations.
+
+**Branding, verification, builds**
+- `references/branding-logo-and-header.md` — logo/favicon, header layout, rendering a logo from a font, the manual-only list (store name, domain, password gate).
+- `references/live-verification-and-gotchas.md` — browser verification, live-DOM-first CSS, the grid-collapse trap, automation gotchas, replicating a reference site.
+- `references/auto-rotating-gallery.md` — progressive, dependency-free product-card image rotation.
+- `references/cart-free-gift-bar.md` — a correct, race-free gift-bar pattern.

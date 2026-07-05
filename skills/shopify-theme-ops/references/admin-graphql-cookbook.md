@@ -72,10 +72,78 @@ mutation($id: ID!, $moves: [MoveInput!]!) {
 
 Prefer **reorder** over delete. `productDeleteMedia` is destructive — surface it and get explicit confirmation before removing images (e.g. wrong-brand shots).
 
+## Files (ingest an external image → Shopify CDN)
+
+```graphql
+mutation { fileCreate(files: [
+  { originalSource: "https://raw.githubusercontent.com/…/logo.png", alt: "…", contentType: IMAGE }
+]) { files { id fileStatus } userErrors { field message } } }
+
+# fileStatus is UPLOADED immediately but image.url is null until processed — poll:
+{ node(id: "gid://shopify/MediaImage/ID") { ... on MediaImage { fileStatus image { url } } } }
+# wait for fileStatus: READY. In theme settings reference as shopify://shop_images/<basename>.
+```
+
+## Product status & inventory
+
+```graphql
+# Activate a DRAFT product (invisible on storefront + previews until ACTIVE + published).
+mutation { productUpdate(product: {id: "gid://…/Product/ID", status: ACTIVE}) {
+  product { id status } userErrors { field message } } }
+
+# Fix "Sold out" on drop-ship / 0-stock: let variants sell when out of stock.
+mutation { productVariantsBulkUpdate(productId: "gid://…/Product/ID",
+    variants: [{id: "gid://…/ProductVariant/VID", inventoryPolicy: CONTINUE}]) {
+  userErrors { field message } } }
+```
+
+## Smart collection + publish
+
+```graphql
+mutation { collectionCreate(input: {
+    title: "Gifts Under ₹5,000", handle: "gifts-under-5k",
+    ruleSet: { appliedDisjunctively: false,
+      rules: [{ column: VARIANT_PRICE, relation: LESS_THAN, condition: "5000" }] }
+  }) { collection { id handle } userErrors { field message } } }
+
+# Then publish to Online Store (create does NOT publish). Find the id first:
+{ publications(first: 5) { nodes { id name } } }          # "Online Store" gid (NOT /1)
+mutation { publishablePublish(id: "gid://shopify/Collection/ID",
+    input: [{ publicationId: "gid://shopify/Publication/ONLINE_STORE_ID" }]) {
+  userErrors { field message } } }
+```
+
+## Menus & pages
+
+```graphql
+# Replace a menu's entire item list. type: HTTP + relative url = always-works internal link.
+mutation { menuUpdate(id: "gid://shopify/Menu/ID", title: "Main menu",
+    items: [{ title: "Home", type: HTTP, url: "/" },
+            { title: "Necklaces", type: HTTP, url: "/collections/necklaces" }]) {
+  menu { id items { title } } userErrors { field message } } }
+mutation { menuDelete(id: "gid://shopify/Menu/ID") { deletedMenuId userErrors { field message } } }
+
+# Pages (new Page API): the content field is `body`, NOT bodyHtml.
+{ pages(first: 25) { nodes { id title handle bodySummary } } }
+mutation { pageUpdate(id: "gid://shopify/Page/ID", page: {title: "Our Story", body: "<p>…</p>"}) {
+  page { id title } userErrors { field message } } }
+```
+
+## Aliased batch (one round-trip, many writes)
+
+```graphql
+mutation Batch($d0: String!, $d1: String!) {
+  p0: productUpdate(product: {id: "gid://…/1", descriptionHtml: $d0}) { userErrors { field message } }
+  p1: productUpdate(product: {id: "gid://…/2", descriptionHtml: $d1}) { userErrors { field message } }
+}
+# vars: { "d0": "<p>…</p>", "d1": "<p>…</p>" }  — generate with a script; keeps big HTML out of the query.
+```
+
 ## Shop
 
 ```graphql
-{ shop { primaryDomain { url } myshopifyDomain } }
+{ shop { name primaryDomain { url } myshopifyDomain } }
+# shop.name is read-only via API — store name change is manual (Settings → Store details).
 ```
 
 ## Verification habits
