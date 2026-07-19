@@ -1,3 +1,5 @@
+![Shopify Ultimate — theme ops via the Admin GraphQL API · CA who codes](.github/banner.png)
+
 # Shopify Ultimate
 
 Hard-won, field-tested techniques for editing Shopify themes and store data programmatically through the **Admin GraphQL API** — especially the newer **Horizon** theme (theme blocks, `color_palette`, custom-liquid sections).
